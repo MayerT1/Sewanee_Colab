@@ -1,0 +1,143 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = 
+    /* color: #d63000 */
+    /* shown: false */
+    ee.Geometry.Polygon(
+        [[[-85.95403899512176, 35.22128753226473],
+          [-85.95560640507541, 35.21519867481589],
+          [-85.9554776590427, 35.21496200940493],
+          [-85.95495194607578, 35.21511978642223],
+          [-85.95338553601108, 35.21546163557435],
+          [-85.95202297383152, 35.215952493377735],
+          [-85.95131487065159, 35.21659235712915],
+          [-85.94957679920994, 35.21709197326388],
+          [-85.94839662724338, 35.21705691258283],
+          [-85.94835371189914, 35.21728480673899],
+          [-85.94698042088352, 35.222573650426604],
+          [-85.94696969204746, 35.22362539277859],
+          [-85.94736665898166, 35.22431778238637],
+          [-85.9484180849155, 35.224449248100264],
+          [-85.9496411722263, 35.22374809516508],
+          [-85.95174589731168, 35.22244065140694],
+          [-85.9518209991641, 35.22199365604728],
+          [-85.9538380203433, 35.221467776001525]]]),
+    domain = ee.FeatureCollection("projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Sewanee_Domain");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+///
+/// Modified by T. Mayer 8/1/25 NASA EarthRISE Sewanee Colab
+///
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+print(geometry)
+
+// Fetch a MODIS NDVI collection and select NDVI.
+var col = ee.ImageCollection('MODIS/006/MOD13A2').select('NDVI');
+
+// Define a mask to clip the NDVI data by.
+var mask = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
+  .filter(ee.Filter.eq('country_co', 'US'));
+Map.addLayer(mask,{}, "mask", false)
+// Define the regional bounds of animation frames.
+
+var region = domain.geometry().buffer(50000)
+
+// var region = ee.Geometry.Polygon(
+// [[[88.53246585783616,26.644628712427455],
+// [92.42162601408616,26.644628712427455],
+// [92.42162601408616,28.533492864311153],
+// [88.53246585783616,28.533492864311153],
+// [88.53246585783616,26.644628712427455],]],
+//   null, false
+// );
+
+Map.addLayer(region, {}, "Buffered Domain")
+
+// Add day-of-year (DOY) property to each image.
+col = col.map(function(img) {
+  var doy = ee.Date(img.get('system:time_start')).getRelative('day', 'year');
+  return img.set('doy', doy);
+});
+
+// Get a collection of distinct images by 'doy'.
+var distinctDOY = col.filterDate('2013-01-01', '2014-01-01');
+
+// Define a filter that identifies which images from the complete
+// collection match the DOY from the distinct DOY collection.
+var filter = ee.Filter.equals({leftField: 'doy', rightField: 'doy'});
+
+// Define a join.
+var join = ee.Join.saveAll('doy_matches');
+
+// Apply the join and convert the resulting FeatureCollection to an
+// ImageCollection.
+var joinCol = ee.ImageCollection(join.apply(distinctDOY, col, filter));
+
+// Apply median reduction among matching DOY collections.
+var comp = joinCol.map(function(img) {
+  var doyCol = ee.ImageCollection.fromImages(
+    img.get('doy_matches')
+  );
+  return doyCol.reduce(ee.Reducer.median());
+});
+
+// Define RGB visualization parameters.
+var visParams = {
+  min: 0.0,
+  max: 9000.0,
+  palette: [
+    'FFFFFF', 'CE7E45', 'DF923D', 'F1B555', 'FCD163', '99B718', '74A901',
+    '66A000', '529400', '3E8601', '207401', '056201', '004C00', '023B01',
+    '012E01', '011D01', '011301'
+  ],
+};
+
+// Create RGB visualization images for use as animation frames.
+var rgbVis = comp.map(function(img) {
+  return img.visualize(visParams).clip(mask);
+});
+
+// Define GIF visualization arguments.
+var gifParams = {
+  'region': region,
+  'dimensions': 600,
+  'crs': 'EPSG:3857',
+  'framesPerSecond': 5,
+  'format': 'gif'
+};
+
+// Print the GIF URL to the console.
+print(rgbVis.getVideoThumbURL(gifParams));
+
+// Render the GIF animation in the console.
+print(ui.Thumbnail(rgbVis, gifParams));
+
+// Enhanced road network visualization.
+var roadNetwork = [
+  {stylers: [{saturation: -100}]}, {
+    featureType: 'road.highway',
+    elementType: 'geometry.fill',
+    stylers: [{color: '#000055'}, {weight: .4}]
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'geometry.stroke',
+    stylers: [{color: '#000000'}, {weight: .4}]
+  },
+  {
+    featureType: 'road.arterial',
+    elementType: 'geometry',
+    stylers: [{color: '#FF0000'}, {weight: .2}]
+  },
+  {
+    featureType: 'road.local',
+    elementType: 'geometry',
+    stylers: [{color: '#00FF55'}, {weight: .1}]
+  }
+];
+
+// Map.setOptions(
+//     'roadNetwork', {iconChange: iconChange, roadNetwork: roadNetwork});
+
+Map.setOptions(
+    'roadNetwork', {roadNetwork: roadNetwork});

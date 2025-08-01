@@ -1,0 +1,260 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-85.95403899512176, 35.22128753226473],
+          [-85.95560640507541, 35.21519867481589],
+          [-85.9554776590427, 35.21496200940493],
+          [-85.95495194607578, 35.21511978642223],
+          [-85.95338553601108, 35.21546163557435],
+          [-85.95202297383152, 35.215952493377735],
+          [-85.95131487065159, 35.21659235712915],
+          [-85.94957679920994, 35.21709197326388],
+          [-85.94839662724338, 35.21705691258283],
+          [-85.94835371189914, 35.21728480673899],
+          [-85.94698042088352, 35.222573650426604],
+          [-85.94696969204746, 35.22362539277859],
+          [-85.94736665898166, 35.22431778238637],
+          [-85.9484180849155, 35.224449248100264],
+          [-85.9496411722263, 35.22374809516508],
+          [-85.95174589731168, 35.22244065140694],
+          [-85.9518209991641, 35.22199365604728],
+          [-85.9538380203433, 35.221467776001525]]]),
+    domain = ee.FeatureCollection("projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Sewanee_Domain");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+///
+/// Modified by T. Mayer 8/1/25 NASA EarthRISE Sewanee Colab
+///
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Map.addLayer(domain, {}, "Domain bounds",false)
+
+// Define a center and zoom level for the maps.
+
+var center = {lon: -85.95, lat: 35.22, zoom: 16};
+// Create two independent ui.Map objects.
+var leftMap = ui.Map(center);
+var rightMap = ui.Map(center);
+
+// Optionally, remove default UI controls from the maps for a cleaner look.
+leftMap.setOptions('SATELLITE');
+rightMap.setOptions('SATELLITE');
+// Keep zoom controls on the left map for user interaction.
+leftMap.setControlVisibility({zoomControl: true});
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var ls = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+    .filterDate('2020-01-01', '2021-12-31').filterBounds(domain);
+var ls_scale = ls.first().projection().nominalScale();
+print('Nominal scale of the ls_scale (meters):', ls_scale); 
+
+function maskL7L8(image) {
+  //Bits 3 and 5 are cloud shadow and cloud, respectively.
+  var cloudShadowBitMask = (1 << 4);
+  var cloudsBitMask = (1 << 3);
+  // Get the pixel QA band.
+  var qa = image.select('QA_PIXEL');
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudShadowBitMask).eq(0)
+               .and(qa.bitwiseAnd(cloudsBitMask).eq(0));
+  return image.updateMask(mask);
+}
+
+var ls_imageCollection = ls.map(maskL7L8)
+
+//
+var ls_image = ls_imageCollection.median().clip(geometry)
+
+var visualization = {
+  bands: ['SR_B4', 'SR_B3', 'SR_B2'],
+  min: 7000,
+  max: 14000,
+};
+
+// Map.addLayer(ls_image, visualization, 'ls annual median composite cloud filtered');
+// Map.centerObject(ls_image)
+leftMap.addLayer(ls_image, visualization, 'ls annual median composite cloud filtered');
+
+/////////////////
+//LS NDVI
+var collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .filterDate('2020-01-01', '2021-12-31') // Filter for dates between Jan 1, 2018 and Jan 1, 2023.
+  .filterBounds(geometry) // Filter by the defined point.
+  .filterMetadata('CLOUD_COVER', 'less_than', 20); // Filter for images with less than 20% cloud cover.
+
+// 3. Create a function to add an NDVI band
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI'); // NIR band is B5, Red band is B4 for Landsat 8.
+  return image.addBands(ndvi);
+};
+
+// Apply the function to the image collection
+var withNDVI = collection.map(addNDVI); // Apply the addNDVI function to every image in the collection.
+
+// 4. Create the chart
+var chart = ui.Chart.image.series({ // Charting an image time series.
+  imageCollection: withNDVI.select('NDVI'), // Select the NDVI band for the chart.
+  region: geometry, // Chart data at the defined point.
+  reducer: ee.Reducer.mean(), // Calculate the mean NDVI within the region.
+  scale: 30 // Scale in meters for the reducer.
+});
+
+// 5. Set chart options and display
+chart.setOptions({ // Customize chart appearance.
+  title: 'LS NDVI over Time at Selected Location',
+  vAxis: {title: 'NDVI'}, // Y-axis label.
+  hAxis: {title: 'Date', format: 'YYYY-MM-dd'}, // X-axis label and format.
+  lineWidth: 2, // Line width.
+  pointSize: 3 // Point size.
+});
+
+//print(chart); // Display the chart in the console.
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                  .filterDate('2020-01-01', '2021-12-31')
+                  // Pre-filter to get less cloudy granules.
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',20)).filterBounds(domain);
+                  // .map(maskS2clouds);
+
+
+var s2_scale = s2.first().select('B4').projection().nominalScale();
+print('Nominal scale of the s2_scale (meters):', s2_scale); 
+
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+
+  // Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image.updateMask(mask).divide(10000);
+}
+
+var s2 = s2.map(maskS2clouds);
+
+var visualization = {
+  min: 0.0,
+  max: 0.3,
+  bands: ['B4', 'B3', 'B2'],
+};
+
+var s2_image = s2.median().clip(geometry)
+
+// Map.addLayer(s2_image, visualization, 's2 annual median composite cloud filtered');
+rightMap.addLayer(s2_image, visualization, 's2 annual median composite cloud filtered');
+/////////////////
+//S2 NDVI
+
+
+// 1. Define your region of interest.
+//    You can either draw a polygon on the map using the geometry tools
+//    or define a point like this example.
+// var roi = ee.Geometry.Point([-86.5862, 34.7304]); // Example point near Huntsville, AL
+
+// 2. Import and filter the Sentinel-2 image collection (Level-2A Surface Reflectance).
+//    We use the harmonized collection for consistent reflectance values.
+var s2Collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterDate('2020-01-01', '2021-12-31') // Filter for dates between Jan 1, 2023 and Jan 1, 2025.
+  .filterBounds(geometry) // Filter by the defined region of interest.
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)); // Filter for images with less than 20% cloud cover.
+
+// 3. Define a function to calculate NDVI and add it as a band.
+//    Sentinel-2's NIR band is B8, and the Red band is B4.
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Apply the NDVI function to the image collection.
+var s2withNDVI = s2Collection.map(addNDVI);
+
+// 4. Create the time series chart.
+var chart_s2 = ui.Chart.image.series({
+  imageCollection: s2withNDVI.select('NDVI'), // Select the 'NDVI' band for charting.
+  region: geometry, // Use your defined region of interest.
+  reducer: ee.Reducer.mean(), // Calculate the mean NDVI within the ROI for each image.
+  scale: 10 // Sentinel-2's resolution is 10 meters, so we use that as the scale.
+});
+
+// 5. Set chart options and display the chart.
+chart_s2.setOptions({
+  title: 'Sentinel-2 NDVI Time Series at Location',
+  vAxis: {title: 'NDVI'},
+  hAxis: {title: 'Date', format: 'YYYY-MM-dd'},
+  lineWidth: 1,
+  pointSize: 3,
+  colors: ['e37d05']
+});
+
+//print(chart_s2); // Display the chart in the console.
+
+
+// Create a panel for the left map and Landsat chart
+var leftPanel = ui.Panel({
+  widgets: [
+    leftMap,
+    ui.Label('Landsat NDVI Time Series', {fontWeight: 'bold', margin: '8px 0 0 0'}),
+    chart
+  ],
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {stretch: 'both'}
+});
+
+// Create a panel for the right map and Sentinel-2 chart
+var rightPanel = ui.Panel({
+  widgets: [
+    rightMap,
+    ui.Label('Sentinel-2 NDVI Time Series', {fontWeight: 'bold', margin: '8px 0 0 0'}),
+    chart_s2
+  ],
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {stretch: 'both'}
+});
+
+
+
+
+///////
+// Create the split panel with the map + chart panels
+var splitPanel = ui.SplitPanel({
+  firstPanel: leftPanel,
+  secondPanel: rightPanel,
+  orientation: 'horizontal',
+  wipe: false,
+  style: {stretch: 'both'}
+});
+
+
+
+
+
+
+
+
+
+
+
+
+// ////////////////
+// // Create a ui.SplitPanel with the two maps.
+// var splitPanel = ui.SplitPanel({
+//   firstPanel: leftMap,
+//   secondPanel: rightMap,
+//   orientation: 'horizontal', // Can be 'horizontal' or 'vertical'
+//   wipe: false, // Enables the wipe functionality for interactive comparison
+//   style: {stretch: 'both'} // Stretches the panel to fill available space
+// });
+
+// Remove the default map from the root panel and add the split panel.
+ui.root.clear();
+ui.root.add(splitPanel);
+
+// Link the two maps so that zooming and panning in one affects the other.
+var linker = ui.Map.Linker([leftMap, rightMap]);
+
