@@ -84,7 +84,7 @@ var collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
 
 // 3. Create a function to add an NDVI band
 var addNDVI = function(image) {
-  var ndvi = image.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI'); // NIR band is B5, Red band is B4 for Landsat 8.
+  var ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI'); // NIR band is B5, Red band is B4 for Landsat 8.
   return image.addBands(ndvi);
 };
 

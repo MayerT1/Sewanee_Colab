@@ -1,0 +1,303 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-85.95403899512176, 35.22128753226473],
+          [-85.95560640507541, 35.21519867481589],
+          [-85.9554776590427, 35.21496200940493],
+          [-85.95495194607578, 35.21511978642223],
+          [-85.95338553601108, 35.21546163557435],
+          [-85.95202297383152, 35.215952493377735],
+          [-85.95131487065159, 35.21659235712915],
+          [-85.94957679920994, 35.21709197326388],
+          [-85.94839662724338, 35.21705691258283],
+          [-85.94835371189914, 35.21728480673899],
+          [-85.94698042088352, 35.222573650426604],
+          [-85.94696969204746, 35.22362539277859],
+          [-85.94736665898166, 35.22431778238637],
+          [-85.9484180849155, 35.224449248100264],
+          [-85.9496411722263, 35.22374809516508],
+          [-85.95174589731168, 35.22244065140694],
+          [-85.9518209991641, 35.22199365604728],
+          [-85.9538380203433, 35.221467776001525]]]),
+    domain = ee.FeatureCollection("projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Sewanee_Domain"),
+    Comp_12 = ee.FeatureCollection("projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Comp_12"),
+    imageVisParam = {"opacity":1,"bands":["NBR"],"min":0.3299656808376312,"max":0.5484642386436462,"palette":["ffffff","f5f5dc","ffff00","ffa500","ff0000","8b0000","000000"]},
+    imageVisParam2 = {"opacity":1,"bands":["NBR"],"min":-0.42254018783569336,"max":0.08076293021440506,"palette":["ffffff","f5f5dc","ffff00","ffa500","ff0000","8b0000","000000"]},
+    imageVisParam3 = {"opacity":1,"bands":["NBR"],"min":0.03167501837015152,"max":0.5103044509887695,"palette":["ffffff","f5f5dc","ffff00","ffa500","ff0000","8b0000","000000"]},
+    imageVisParam4 = {"opacity":1,"bands":["NBR"],"min":-0.13908541202545166,"max":0.7530435919761658,"palette":["ffffff","f5f5dc","ffff00","ffa500","ff0000","8b0000","000000"]};
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+///
+/// Modified by T. Mayer 8/1/25 NASA EarthRISE Sewanee Colab
+///
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// var Comp_12 = Comp_12.geometry().buffer(1000)
+
+var startDate = '2024-01-01'
+var endDate = '2025-06-30'
+
+var visParams = {
+  min: -1,
+  max: 1,
+  palette: [
+    'white',    // very low values
+    'beige',    // bare soil or very light burn
+    'yellow',
+    'orange',
+    'red',      // burned areas
+    'darkred',
+    'black'     // very severely burned
+  ]
+};
+
+Map.addLayer(Comp_12, {}, "Domain bounds",false)
+
+// Define a center and zoom level for the maps.
+
+var center = {lon: -85.932, lat: 35.1686, zoom: 16};
+// Create two independent ui.Map objects.
+var leftMap = ui.Map(center);
+var rightMap = ui.Map(center);
+
+// Optionally, remove default UI controls from the maps for a cleaner look.
+leftMap.setOptions('SATELLITE');
+rightMap.setOptions('SATELLITE');
+// Keep zoom controls on the left map for user interaction.
+leftMap.setControlVisibility({zoomControl: true});
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .filterDate(startDate, endDate) // Filter for dates between Jan 1, 2018 and Jan 1, 2023.
+  .filterBounds(Comp_12) // Filter by the defined point.
+  .filterMetadata('CLOUD_COVER', 'less_than', 20); // Filter for images with less than 20% cloud cover.
+
+var ls_scale = collection.first().projection().nominalScale();
+print('Nominal scale of the ls_scale (meters):', ls_scale); 
+
+function maskL7L8(image) {
+  //Bits 3 and 5 are cloud shadow and cloud, respectively.
+  var cloudShadowBitMask = (1 << 4);
+  var cloudsBitMask = (1 << 3);
+  // Get the pixel QA band.
+  var qa = image.select('QA_PIXEL');
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudShadowBitMask).eq(0)
+               .and(qa.bitwiseAnd(cloudsBitMask).eq(0));
+  return image.updateMask(mask);
+}
+
+collection.map(maskL7L8)
+print("collection", collection)
+// 3. Create a function to add an NDVI band
+var addNBR = function(image) {
+  var nbr = image.normalizedDifference(['SR_B5', 'SR_B7']).rename('NBR'); // NIR band is B5, Red band is B4 for Landsat 8.
+  return image.addBands(nbr);
+};
+
+// Apply the function to the image collection
+var withNBR = collection.map(addNBR)
+
+var ls_image = withNBR.max().clip(Comp_12)
+var ls_image_mode = withNBR.mode().clip(Comp_12)
+// Map.addLayer(ls_image, visualization, 'ls annual median composite cloud filtered');
+// Map.centerObject(ls_image)
+
+leftMap.addLayer(ls_image_mode.select("NBR"), imageVisParam2, 'NBR ls annual mode composite cloud filtered')
+leftMap.addLayer(ls_image.select("NBR"), imageVisParam, 'NBR ls annual median composite cloud filtered');
+// /////////////////
+
+var chart = ui.Chart.image.series({ // Charting an image time series.
+  imageCollection: withNBR.select('NBR'), // Select the NDVI band for the chart.
+  region: geometry, // Chart data at the defined point.
+  reducer: ee.Reducer.mean(), // Calculate the mean NDVI within the region.
+  scale: 30 // Scale in meters for the reducer.
+});
+
+// 5. Set chart options and display
+chart.setOptions({ // Customize chart appearance.
+  title: 'LS NBR over Time at Selected Location',
+  vAxis: {title: 'NBR'}, // Y-axis label.
+  hAxis: {title: 'Date', format: 'YYYY-MM-dd'}, // X-axis label and format.
+  lineWidth: 2, // Line width.
+  pointSize: 3 // Point size.
+});
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                  .filterDate(startDate, endDate)
+                  // Pre-filter to get less cloudy granules.
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',10)).filterBounds(Comp_12);
+                  // .map(maskS2clouds);
+
+var s2_scale = s2.first().select('B4').projection().nominalScale();
+print('Nominal scale of the s2_scale (meters):', s2_scale); 
+
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+
+  // Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image.updateMask(mask).divide(10000).copyProperties(image, image.propertyNames());
+}
+
+var s2 = s2.map(maskS2clouds);
+
+var addNBR = function(image) {
+  var NBR = image.normalizedDifference(['B8', 'B12']).rename('NBR');
+  return image.addBands(NBR);
+};
+
+// Apply the NDVI function to the image collection.
+var s2withNBR = s2.map(addNBR);
+
+var s2_image = s2withNBR.median().clip(Comp_12)
+var s2_image_mode = s2withNBR.mode().clip(Comp_12)
+
+rightMap.addLayer(s2_image_mode.select("NBR"), imageVisParam4, 'NBR s2 annual mode composite cloud filtered')
+rightMap.addLayer(s2_image.select("NBR"), imageVisParam3, 'NBR s2 annual median composite cloud filtered');
+///
+// 4. Create the time series chart.
+var chart_s2 = ui.Chart.image.series({
+  imageCollection: s2withNBR.select('NBR'), // Select the 'NDVI' band for charting.
+  region: geometry, // Use your defined region of interest.
+  reducer: ee.Reducer.mean(), // Calculate the mean NDVI within the ROI for each image.
+  scale: 10 // Sentinel-2's resolution is 10 meters, so we use that as the scale.
+});
+
+// 5. Set chart options and display the chart.
+chart_s2.setOptions({
+  title: 'Sentinel-2 NBR Time Series at Location',
+  vAxis: {title: 'NBR'},
+  hAxis: {title: 'Date', format: 'YYYY-MM-dd'},
+  lineWidth: 1,
+  pointSize: 3,
+  colors: ['e37d05']
+});
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+print("Temporal range of analysis:", startDate,  endDate)
+print("Note the spatial resolution and temporal resolution trade offs displayed in the NBR trend graphs")
+print("note these ia  Median and Mode composite (bounded by start and end dates")
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Create a panel for the left map and Landsat chart
+var leftPanel = ui.Panel({
+  widgets: [
+    leftMap,
+    ui.Label('Landsat NBR Time Series', {fontWeight: 'bold', margin: '8px 0 0 0'}),
+    chart
+  ],
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {stretch: 'both'}
+});
+
+// Create a panel for the right map and Sentinel-2 chart
+var rightPanel = ui.Panel({
+  widgets: [
+    rightMap,
+    ui.Label('Sentinel-2 NBR Time Series', {fontWeight: 'bold', margin: '8px 0 0 0'}),
+    chart_s2
+  ],
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {stretch: 'both'}
+});
+/////////////////
+
+
+
+
+///////
+// Create the split panel with the map + chart panels
+var splitPanel = ui.SplitPanel({
+  firstPanel: leftPanel,
+  secondPanel: rightPanel,
+  orientation: 'horizontal',
+  wipe: false,
+  style: {stretch: 'both'}
+});
+
+
+// Remove the default map from the root panel and add the split panel.
+ui.root.clear();
+ui.root.add(splitPanel);
+
+
+
+
+///////////////////
+
+// Create a color legend with label descriptions
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)'
+  }
+});
+
+// Add a title
+legend.add(ui.Label({
+  value: 'NBR Color Legend',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '14px',
+    margin: '0 0 8px 0'
+  }
+}));
+
+// Define color palette and corresponding labels
+var palette = visParams.palette;
+var labels = [
+  'Very Low Vegetation / Unburned',
+  'Bare Soil / Light Burn',
+  'Low Burn Severity',
+  'Moderate Burn Severity',
+  'High Burn Severity',
+  'Severe Burn',
+  'Complete Canopy Loss'
+];
+
+// Add each color + label to the legend
+for (var i = 0; i < palette.length; i++) {
+  var colorBox = ui.Label({
+    style: {
+      backgroundColor: palette[i],
+      padding: '8px',
+      margin: '0 8px 4px 0',
+      border: '1px solid black'
+    }
+  });
+
+  var description = ui.Label({
+    value: labels[i],
+    style: {margin: '0 0 4px 0'}
+  });
+
+  legend.add(ui.Panel({
+    widgets: [colorBox, description],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  }));
+}
+
+// Add the legend to the left map
+leftMap.add(legend);
+
+///////////////////////////////////////////
+
+
+
+
+// Link the two maps so that zooming and panning in one affects the other.
+var linker = ui.Map.Linker([leftMap, rightMap]);
+
