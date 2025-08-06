@@ -88,7 +88,7 @@ function maskL7L8(image) {
 }
 
 collection.map(maskL7L8)
-print("collection", collection)
+
 // 3. Create a function to add an NDVI band
 var addNBR = function(image) {
   var nbr = image.normalizedDifference(['SR_B5', 'SR_B7']).rename('NBR'); // NIR band is B5, Red band is B4 for Landsat 8.
@@ -187,7 +187,7 @@ chart_s2.setOptions({
 
 print("Temporal range of analysis:", startDate,  endDate)
 print("Note the spatial resolution and temporal resolution trade offs displayed in the NBR trend graphs")
-print("note these ia  Median and Mode composite (bounded by start and end dates")
+print("Note these produced Median and Mode NBR composites are bounded by start and end dates")
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

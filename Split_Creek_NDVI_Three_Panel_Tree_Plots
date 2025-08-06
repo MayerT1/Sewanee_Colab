@@ -25,7 +25,7 @@ var geometry = /* color: #d63000 */ee.Geometry.Polygon(
 /***** End of imports. If edited, may not auto-convert in the playground. *****/
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///
-/// Modified by T. Mayer 8/4/25 NASA EarthRISE Sewanee Colab
+/// Modified by T. Mayer 8/6/25 NASA EarthRISE Sewanee Colab
 ///
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -54,17 +54,17 @@ var ndviVisDetailed = {
 ///////////////
 // Your FeatureCollection
 var fc = ee.FeatureCollection('projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Split_Creek_Ob')
-
+// print(fc)
 // Get distinct species names as a server-side list
 var speciesList = fc.aggregate_array('Species').distinct();
 
 // Print the list to the console (this will show the unique species)
-print('Unique Species:', speciesList);
+// print('Unique Species:', speciesList);
 
 // To bring the list client-side (Array of strings), use .getInfo() carefully:
 // Note: .getInfo() is synchronous and should be used for small lists only.
 speciesList.getInfo(function(list) {
-  print('Species list (client-side):', list);
+  // print('Species list (client-side):', list);
 });
 
 
@@ -101,6 +101,12 @@ var styleFeature = function(feature) {
 };
 
 var styledFc = fc.map(styleFeature);
+
+var filteredFc = fc.filter(ee.Filter.neq('Species', null)).map(function(f) {
+  var species = ee.String(f.get('Species')).trim();
+  return f.set('Species', species);
+}).filter(ee.Filter.neq('Species', ''));
+
 
 // Map.addLayer(styledFc.style({styleProperty: 'style'}), {}, 'Species colored features');
 ////////////////
@@ -188,7 +194,7 @@ var chart = ui.Chart.image.series({ // Charting an image time series.
 
 // Set chart options and display
 chart.setOptions({ // Customize chart appearance.
-  title: 'LS NDVI over Time at Selected Location',
+  title: 'LS NDVI over time across the split creek watershed',
   vAxis: {title: 'NDVI'}, // Y-axis label.
   hAxis: {title: 'Date', format: 'YYYY-MM-dd'}, // X-axis label and format.
   lineWidth: 2, // Line width.
@@ -244,7 +250,7 @@ var chart_s2 = ui.Chart.image.series({
 
 
 chart_s2.setOptions({
-  title: 'Sentinel-2 NDVI Time Series at Location',
+  title: 'Sentinel-2 NDVI over time across the split creek watershed',
   vAxis: {title: 'NDVI'},
   hAxis: {title: 'Date', format: 'YYYY-MM-dd'},
   lineWidth: 1,
@@ -282,7 +288,7 @@ var naipchart = ui.Chart.image.series({ // Charting an image time series.
 
 
 naipchart.setOptions({ // Customize chart appearance.
-  title: 'NAIP NDVI over Time at Selected Location',
+  title: 'NAIP NDVI over time across the split creek watershed',
   vAxis: {title: 'NDVI'}, // Y-axis label.
   hAxis: {title: 'Date', format: 'YYYY-MM-dd'}, // X-axis label and format.
   lineWidth: 2, // Line width.
@@ -342,8 +348,58 @@ var panel = ui.Panel([
 ], ui.Panel.Layout.Flow('horizontal'), {stretch: 'both'});
 ///////////////////////////////////////////////////////////////////////////
 
+print('Charting of NDVI across all EO, bounded by time, per species')
+///Chart per NDVI per speices
 
+// Assuming your NDVI images are defined like this:
+var sources = {
+  LS: ls_image,
+  S2: s2_image,
+  NAIP: NAIP_image
+};
 
+// Step 1: Harmonize species property name to 'species'
+filteredFc = filteredFc.map(function(f) {
+  return f.set('species', f.get('Species'));
+});
+
+// Step 2: Sample NDVI from each image and attach metadata
+var combinedSamples = ee.FeatureCollection([]);
+
+Object.keys(sources).forEach(function(sourceKey) {
+  var ndviImage = sources[sourceKey];
+
+  var sampled = ndviImage.sampleRegions({
+    collection: filteredFc,
+    scale: 1, // Use appropriate scale per sensor: LS=30, S2=10, NAIP=1
+    geometries: false
+  }).map(function(f) {
+    return f.set({
+      source: sourceKey,
+      species: f.get('species') // Ensures 'species' is retained
+    });
+  });
+
+  combinedSamples = combinedSamples.merge(sampled);
+});
+
+// Step 3: Create chart (ColumnChart: NDVI by species, grouped by source)
+var chart = ui.Chart.feature.groups({
+  features: combinedSamples,
+  xProperty: 'species',
+  yProperty: 'NDVI',  // Change if NDVI band is named differently
+  seriesProperty: 'source'
+})
+.setChartType('ColumnChart')
+.setOptions({
+  title: 'NDVI by Species and Source',
+  hAxis: {title: 'Species'},
+  vAxis: {title: 'NDVI'},
+  legend: {position: 'top'},
+  height: 500
+});
+
+print(chart);
 
 
 ///////////////////////////////////////////////////////////////////////////
@@ -354,25 +410,34 @@ ui.root.add(panel);
 
 ////////////////////////////////////////////////////////////////////////////
 
-
-// Floating NDVI Legend
-var legend = ui.Panel({
+// Container for both NDVI and Species legends
+var legendContainer = ui.Panel({
+  layout: ui.Panel.Layout.Flow('vertical'),
   style: {
     position: 'bottom-right',
+    padding: '0px',
+    margin: '0px',
+    backgroundColor: 'rgba(255, 255, 255, 0)', // transparent to show individual panel backgrounds
+  }
+});
+
+// NDVI Legend Panel
+var ndviLegend = ui.Panel({
+  style: {
     padding: '8px 15px',
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
     border: '1px solid black',
     maxHeight: '250px',
-    width: '120px'
+    width: '140px'
   }
 });
 
-// Legend title
+// NDVI Legend title
 var legendTitle = ui.Label({
   value: 'NDVI Legend',
   style: {fontWeight: 'bold', margin: '0 0 4px 0', fontSize: '12px'}
 });
-legend.add(legendTitle);
+ndviLegend.add(legendTitle);
 
 // Palette and corresponding labels
 var palette = ndviVisDetailed.palette;
@@ -397,11 +462,161 @@ for (var i = 0; i < palette.length; i++) {
     layout: ui.Panel.Layout.Flow('horizontal')
   });
 
-  legend.add(legendItem);
+  ndviLegend.add(legendItem);
 }
 
-// Add to the UI root (outside map panels)
-ui.root.add(legend);
+// Add NDVI legend to container
+legendContainer.add(ndviLegend);
+
+// Species Legend Panel
+var speciesLegend = ui.Panel({
+  style: {
+    padding: '8px 15px',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    border: '1px solid black',
+    maxHeight: '300px',
+    width: '140px',
+    margin: '4px 0 0 0'
+  }
+});
+
+var speciesLegendTitle = ui.Label({
+  value: 'Species Legend',
+  style: {fontWeight: 'bold', margin: '0 0 4px 0', fontSize: '12px'}
+});
+speciesLegend.add(speciesLegendTitle);
+
+// Populate species legend
+speciesToColor.evaluate(function(dict) {
+  Object.keys(dict).forEach(function(key) {
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: dict[key],
+        padding: '8px',
+        margin: '0 4px 0 0'
+      }
+    });
+
+    var description = ui.Label({
+      value: key,
+      style: {margin: '0 0 4px 0', fontSize: '11px'}
+    });
+
+    var legendItem = ui.Panel({
+      widgets: [colorBox, description],
+      layout: ui.Panel.Layout.Flow('horizontal')
+    });
+
+    speciesLegend.add(legendItem);
+  });
+
+  // Add species legend below NDVI legend
+  legendContainer.add(speciesLegend);
+});
+
+// Add combined legend container to the root
+ui.root.add(legendContainer);
+////////////////////////////////////
+
+///////////
+//Commented off code for charitgn species or NDVI indidvidually 
+
+// // Floating NDVI Legend
+// var legend = ui.Panel({
+//   style: {
+//     position: 'bottom-right',
+//     padding: '8px 15px',
+//     backgroundColor: 'rgba(255, 255, 255, 0.8)',
+//     border: '1px solid black',
+//     maxHeight: '250px',
+//     width: '120px'
+//   }
+// });
+
+// // Legend title
+// var legendTitle = ui.Label({
+//   value: 'NDVI Legend',
+//   style: {fontWeight: 'bold', margin: '0 0 4px 0', fontSize: '12px'}
+// });
+// legend.add(legendTitle);
+
+// // Palette and corresponding labels
+// var palette = ndviVisDetailed.palette;
+// var names = ['No Veg', 'Very Low', 'Low', 'Mod-Low', 'Mod', 'Mod-High', 'High', 'V. High', 'Dense', 'Max Veg'];
+
+// for (var i = 0; i < palette.length; i++) {
+//   var colorBox = ui.Label({
+//     style: {
+//       backgroundColor: '#' + palette[i],
+//       padding: '8px',
+//       margin: '0 4px 0 0'
+//     }
+//   });
+
+//   var description = ui.Label({
+//     value: names[i],
+//     style: {margin: '0 0 4px 0', fontSize: '11px'}
+//   });
+
+//   var legendItem = ui.Panel({
+//     widgets: [colorBox, description],
+//     layout: ui.Panel.Layout.Flow('horizontal')
+//   });
+
+//   legend.add(legendItem);
+// }
+
+// // Add to the UI root (outside map panels)
+// ui.root.add(legend);
+
+// /////////////
+// // Species Legend Panel
+// var speciesLegend = ui.Panel({
+//   style: {
+//     position: 'bottom-right',
+//     padding: '8px 15px',
+//     backgroundColor: 'rgba(255, 255, 255, 0.8)',
+//     border: '1px solid black',
+//     maxHeight: '300px',
+//     width: '150px',
+//     margin: '5px 0 0 0'
+//   }
+// });
+
+// // Legend title
+// var speciesLegendTitle = ui.Label({
+//   value: 'Species Legend',
+//   style: {fontWeight: 'bold', margin: '0 0 4px 0', fontSize: '12px'}
+// });
+// speciesLegend.add(speciesLegendTitle);
+
+// // Add each species with corresponding color
+// speciesToColor.evaluate(function(dict) {
+//   Object.keys(dict).forEach(function(key) {
+//     var colorBox = ui.Label({
+//       style: {
+//         backgroundColor: dict[key],
+//         padding: '8px',
+//         margin: '0 4px 0 0'
+//       }
+//     });
+
+//     var description = ui.Label({
+//       value: key,
+//       style: {margin: '0 0 4px 0', fontSize: '11px'}
+//     });
+
+//     var legendItem = ui.Panel({
+//       widgets: [colorBox, description],
+//       layout: ui.Panel.Layout.Flow('horizontal')
+//     });
+
+//     speciesLegend.add(legendItem);
+//   });
+
+//   // Add species legend panel to the UI after it's populated
+//   ui.root.add(speciesLegend);
+// });
 
 
 

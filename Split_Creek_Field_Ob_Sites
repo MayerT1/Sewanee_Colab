@@ -1,0 +1,126 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var domain = ee.FeatureCollection("projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Sewanee_Domain"),
+    GEDI_Raster = ee.Image("projects/servir-sco-assets/assets/Rx_Fire/EO_Outputs/Sewanee/GEDIindicesB_2021"),
+    split_creek = ee.FeatureCollection("projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Split_Creek_Observatory"),
+    GEDI_L2A = ee.ImageCollection("LARSE/GEDI/GEDI02_A_002_MONTHLY"),
+    sites = ee.FeatureCollection("projects/servir-sco-assets/assets/Rx_Fire/Vector_Data/Split_Creek_Ob");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Map.addLayer(GEDI_Raster)
+// Map.addLayer(GEDI_L2A.filterBounds(split_creek))
+Map.addLayer(split_creek)
+Map.addLayer(sites,{}, "Sites",false)
+
+// Your FeatureCollection
+var fc = sites
+
+// Get distinct species names as a server-side list
+var speciesList = fc.aggregate_array('Species').distinct();
+
+// Print the list to the console (this will show the unique species)
+print('Unique Species:', speciesList);
+
+// To bring the list client-side (Array of strings), use .getInfo() carefully:
+// Note: .getInfo() is synchronous and should be used for small lists only.
+speciesList.getInfo(function(list) {
+  print('Species list (client-side):', list);
+});
+
+
+var speciesToColor = ee.Dictionary({
+  'Black Cherry': '#990000',
+  'Black Oak': '#3B2F2F',
+  'Chestnut Oak': '#954535',
+  'Dead Standing': '#808080',
+  'Pale Hickory': '#EEE8AA',
+  'Red Maple': '#FF0000',
+  'Scarlet Oak': '#FF2400',
+  'Sourwood': '#6A0DAD',
+  'Tulip Poplar': '#9ACD32',
+  'White Oak': '#FFFFFF'
+});
+
+var defaultColor = '#999999';  // Gray for unknown/missing species
+
+var styleFeature = function(feature) {
+  var species = feature.get('Species');
+  // If species is null or empty string, use defaultColor
+  var color = ee.Algorithms.If(
+    ee.Algorithms.IsEqual(species, null),
+    defaultColor,
+    ee.Algorithms.If(
+      ee.String(species).length().eq(0),
+      defaultColor,
+      speciesToColor.get(species, defaultColor)
+    )
+  );
+  
+  var style = {color: color, width: 2};
+  return feature.set('style', style);
+};
+
+var styledFc = fc.map(styleFeature);
+
+Map.addLayer(styledFc.style({styleProperty: 'style'}), {}, 'Species colored features');
+Map.centerObject(fc, 16);
+
+
+
+// Your AOI geometry (replace with your actual split_creek)
+// var split_creek = /* your ee.Geometry or FeatureCollection */;
+var aoi = split_creek.geometry()//.buffer(10000);
+
+// Define your qualityMask function (example: mask low quality pixels)
+function qualityMask(image) {
+  // This is a placeholder; adjust to your actual quality criteria
+  var quality = image.select('quality_flag'); // example band
+  return image.updateMask(quality.eq(0));
+}
+
+// Load GEDI ImageCollection and apply quality mask + select rh98 band
+var dataset = ee.ImageCollection('LARSE/GEDI/GEDI02_A_002_MONTHLY')
+                .map(qualityMask)
+                .select('rh98').filterBounds(aoi);
+
+// Clip each image in the collection to your AOI
+var clippedDataset = dataset.map(function(image) {
+  return image.clip(aoi);
+});
+
+// Visualize an example image (e.g., first image in collection)
+// var first = clippedDataset.first();
+
+Map.addLayer(clippedDataset, {min: 0, max: 50, palette: ['blue', 'green', 'yellow', 'red']}, 'rh98 clipped');
+
+// Optional: Print info
+print('Clipped GEDI ImageCollection:', clippedDataset);
+
+
+//////////////
+
+
+// Convert rh98 to integer (e.g., rh98 * 100 → int)
+var rh98_int = clippedDataset.median().multiply(100).toInt();
+
+// Convert pixels with valid 'rh98' values to points
+var pixelPoints = rh98_int.reduceToVectors({
+  geometry: aoi,
+  geometryType: 'centroid',
+  scale: 25,  // GEDI nominal footprint
+  geometryInNativeProjection: true,
+  bestEffort: true,
+  maxPixels: 1e8
+});
+
+// Create 25 m diameter circles around each centroid (12.5 m buffer)
+var circles = pixelPoints.map(function(feature) {
+  var center = feature.geometry();
+  var buffer = center.buffer(12.5);  // Radius = 12.5 m
+  return ee.Feature(buffer).copyProperties(feature);
+});
+
+// Display
+Map.centerObject(aoi, 12);
+Map.addLayer(circles.style({color: 'red', fillColor: '00000000'}), {}, 'GEDI 25m plots');
+
+// Optional: Print sample
+print('25m GEDI plots from rh98 pixels:', circles);
