@@ -1,3 +1,10 @@
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+///
+/// Modified by T. Mayer 9/14/25 UAH LAS; NASA EarthRISE; Sewanee Colab
+///
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 ////////////////////////////////////// LANDTRENDR (complete, drop-in) ////////////////////////////////////////
 // Full script: runs LT-GEE, builds discrete Year-of-Detection classes (7 bins by default),
 // adds all map layers with correct palettes, and creates a single stacked legend UI.
@@ -109,10 +116,7 @@ Map.addLayer(changeImg.clip(aoi).select(['rate']), rateVizParms, 'Rate');
 
 
 
-////////////////
-// ---------------------- LEGEND UI BUILDERS ----------------------
-
-// Vertical continuous legend (each swatch+label stacked)
+// Vertical continuous legend (ultra-compact)
 function makeVerticalLegend(visParams, title) {
   var min = visParams.min;
   var max = visParams.max;
@@ -122,27 +126,27 @@ function makeVerticalLegend(visParams, title) {
 
   var panel = ui.Panel({
     layout: ui.Panel.Layout.flow('vertical'),
-    style: {margin: '6px'}
+    style: {margin: '1px'}
   });
 
-  panel.add(ui.Label(title, {fontWeight: 'bold', fontSize: '12px'}));
+  panel.add(ui.Label(title, {fontWeight: 'bold', fontSize: '8px', margin: '0 0 2px 0'}));
 
   palette.forEach(function(color, idx) {
     var from = min + idx * stepSize;
     var to   = (idx === nColors - 1) ? max : (min + (idx + 1) * stepSize);
-    var labelText = from.toFixed(0) + ' – ' + to.toFixed(0);
+    var labelText = from.toFixed(0) + '-' + to.toFixed(0);
 
     var row = ui.Panel({
       layout: ui.Panel.Layout.flow('horizontal'),
       widgets: [
         ui.Label('', {
           backgroundColor: color,
-          padding: '8px',
-          margin: '0 6px 4px 0',
-          width: '20px',
+          padding: '2px',
+          margin: '0 2px 1px 0',
+          width: '10px',
           border: '1px solid #666'
         }),
-        ui.Label(labelText, {fontSize: '10px'})
+        ui.Label(labelText, {fontSize: '7px'})
       ]
     });
     panel.add(row);
@@ -151,14 +155,14 @@ function makeVerticalLegend(visParams, title) {
   return panel;
 }
 
-// Vertical discrete legend (for YOD bins)
+// Vertical discrete legend (ultra-compact)
 function makeDiscreteVerticalLegend(palette, labels, title) {
   var panel = ui.Panel({
     layout: ui.Panel.Layout.flow('vertical'),
-    style: {margin: '6px'}
+    style: {margin: '1px'}
   });
 
-  panel.add(ui.Label(title, {fontWeight: 'bold', fontSize: '12px'}));
+  panel.add(ui.Label(title, {fontWeight: 'bold', fontSize: '8px', margin: '0 0 2px 0'}));
 
   palette.forEach(function(color, i) {
     var row = ui.Panel({
@@ -166,12 +170,12 @@ function makeDiscreteVerticalLegend(palette, labels, title) {
       widgets: [
         ui.Label('', {
           backgroundColor: color,
-          padding: '8px',
-          margin: '0 6px 4px 0',
-          width: '20px',
+          padding: '2px',
+          margin: '0 2px 1px 0',
+          width: '10px',
           border: '1px solid #666'
         }),
-        ui.Label(labels[i], {fontSize: '10px'})
+        ui.Label(labels[i], {fontSize: '7px'})
       ]
     });
     panel.add(row);
@@ -180,16 +184,17 @@ function makeDiscreteVerticalLegend(palette, labels, title) {
   return panel;
 }
 
-// ---------------------- LEGEND CONTAINER ----------------------
+// Compact legend container
 var legendContainer = ui.Panel({
   style: {
     position: 'bottom-left',
-    padding: '8px 12px',
+    padding: '2px 4px',
     backgroundColor: 'rgba(255,255,255,0.85)',
     maxHeight: '80%'
   },
   layout: ui.Panel.Layout.flow('horizontal')  // side by side
 });
+
 
 // Build year-bin labels
 var yearBinLabels = [];
