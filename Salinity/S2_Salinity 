@@ -90,6 +90,8 @@ var salinityStack = NDSI
 print('Stacked Salinity Indices', salinityStack);
 Map.addLayer(salinityStack.select('NDSI'), {min:0, max:1, palette:['blue','cyan','green','yellow','red']}, 'NDSI from Stack');
 
+
+
 ///salinity data
 /// update with in situ data
 /// tune the model
@@ -123,6 +125,21 @@ var predictedSalinity = salinityStack.classify(rf);
 
 Map.centerObject(aoi, 10);
 Map.addLayer(predictedSalinity, {min:0, max:20, palette:['blue','cyan','green','yellow','red']}, 'Predicted Salinity');
+
+
+///////////////////
+//////////////
+
+// Load global intertidal image
+var global_intertidal = ee.ImageCollection('UQ/murray/Intertidal/v1_1/global_intertidal')
+  .mosaic(); // combine to a single image
+
+// The dataset has a 'classification' band: 1 = intertidal, 0 = non-intertidal
+var intertidalMask = global_intertidal.select('classification').eq(1);
+
+// Clip your prediction (predictedSalinity) to intertidal areas
+var predictedSalinity_intertidal = predictedSalinity.updateMask(intertidalMask);
+
 
 
 
