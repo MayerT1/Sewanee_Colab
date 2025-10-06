@@ -1,0 +1,129 @@
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// T. Mayer 10/6/25 NASA EarthRISE Sewanee Colab
+//
+// Salinity indices Spectral Functions Reference
+// Normalized Differential (Khan et al., 2005)
+// Salinity Index
+// Brightness index (Khan et al., 2005)
+// Salinity Index 1 (Douaoui et al., 2006)
+// Salinity Index 2 (Douaoui et al., 2006)
+// Salinity Index 3 (Bannari et al., 2008)
+// Salinity Index 4 (Abbas and Khan, 2007)
+// Salinity Index 5 (Bannari et al., 2008)
+// https://gee-community-catalog.org/projects/salinity/
+// Thorslund, Josefin; van Vliet, Michelle T H (2020): A global salinity dataset of surface water
+// and groundwater measurements from 1980-2019. PANGAEA, https://doi.org/10.1594/PANGAEA.913939
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Define your area of interest (example: a lake)
+var aoi = ee.Geometry.Point([-80.19159518445197,32.595330482343776]).buffer(5000);
+
+// Load Landsat 8 Surface Reflectance
+var l8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+           .filterBounds(aoi)
+           .filterDate('2024-01-01', '2024-03-01')
+           .filter(ee.Filter.lt('CLOUD_COVER', 30)); // initial cloud filter
+
+
+function maskL7L8(image) {
+  // Bits 3 and 5 are cloud shadow and cloud, respectively.
+  var cloudShadowBitMask = (1 << 4);
+  var cloudsBitMask = (1 << 3);
+  // Get the pixel QA band.
+  var qa = image.select('QA_PIXEL');
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudShadowBitMask).eq(0)
+               .and(qa.bitwiseAnd(cloudsBitMask).eq(0));
+  return image.updateMask(mask);
+}
+
+// Apply cloud masking to the collection
+var l8Masked = l8.map(maskL7L8);
+
+var l8Composite = l8Masked.median();
+
+
+var B2 = l8Composite.select('SR_B2'); // Blue
+var B3 = l8Composite.select('SR_B3'); // Green
+var B4 = l8Composite.select('SR_B4'); // Red
+var B5 = l8Composite.select('SR_B5'); // NIR
+var B6 = l8Composite.select('SR_B6'); // SWIR1
+var B7 = l8Composite.select('SR_B7'); // SWIR2
+
+
+var NDSI = B6.subtract(B4).divide(B6.add(B4)).rename('NDSI');
+var BI = B2.pow(2).add(B3.pow(2)).add(B4.pow(2)).sqrt().rename('BI');
+var SI1 = B6.divide(B4).rename('SI1');
+var SI2 = B6.divide(B3).rename('SI2');
+var SI3 = B6.subtract(B4).divide(B6.add(B4)).rename('SI3');
+var SI4 = B5.subtract(B4).divide(B5.add(B4)).rename('SI4');
+var SI5 = B6.divide(B5).rename('SI5');
+
+
+
+Map.centerObject(aoi, 10);
+
+var visParams = {min:0, max:1, palette:['blue','cyan','green','yellow','red']};
+
+Map.addLayer(NDSI, visParams, 'NDSI');
+Map.addLayer(BI, visParams, 'Brightness Index',false);
+Map.addLayer(SI1, visParams, 'Salinity Index 1',false);
+Map.addLayer(SI2, visParams, 'Salinity Index 2',false);
+Map.addLayer(SI3, visParams, 'Salinity Index 3',false);
+Map.addLayer(SI4, visParams, 'Salinity Index 4',false);
+Map.addLayer(SI5, visParams, 'Salinity Index 5',false);
+
+
+////Stack
+// Create a multi-band image by stacking all indices
+var salinityStack = NDSI
+  .addBands(BI)
+  .addBands(SI1)
+  .addBands(SI2)
+  .addBands(SI3)
+  .addBands(SI4)
+  .addBands(SI5);
+
+// Print to check
+print('Stacked Salinity Indices', salinityStack);
+Map.addLayer(salinityStack.select('NDSI'), {min:0, max:1, palette:['blue','cyan','green','yellow','red']}, 'NDSI from Stack');
+
+///salinity data
+/// update with in situ data
+/// tune the model
+var groundwater = ee.FeatureCollection("projects/sat-io/open-datasets/global_water_salinity/groundwaters_database");
+var rivers = ee.FeatureCollection("projects/sat-io/open-datasets/global_water_salinity/rivers_database");
+var lakes_reservoir = ee.FeatureCollection("projects/sat-io/open-datasets/global_water_salinity/lakes_reservoirs_database");
+
+Map.addLayer(groundwater,{'color':'red','opacity':0.5},'Ground Database',false)
+Map.addLayer(rivers,{'color':'blue','opacity':0.5},'Rivers Database',false)
+Map.addLayer(lakes_reservoir,{'color':'brown','opacity':0.5},'Lakes and Reservoirs Database',false)
+
+
+var aoiSalinity = rivers.filterBounds(aoi); // use lakes_reservoir, rivers, or groundwater as needed
+Map.addLayer(aoiSalinity,{},'aoiSalinity')
+// Sample the indices at salinity points
+var training = salinityStack.sampleRegions({
+  collection: aoiSalinity,
+  properties: ['EC'], // or 'Salinity', the column in dataset
+  scale: 10
+});
+
+
+var rf = ee.Classifier.smileRandomForest(100).train({
+  features: training,
+  classProperty: 'EC', // replace with actual salinity field
+  inputProperties: salinityStack.bandNames()
+});
+
+var predictedSalinity = salinityStack.classify(rf);
+
+
+Map.centerObject(aoi, 10);
+Map.addLayer(predictedSalinity, {min:0, max:20, palette:['blue','cyan','green','yellow','red']}, 'Predicted Salinity');
+
+
+
+
